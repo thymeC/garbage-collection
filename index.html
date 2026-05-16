@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>垃圾回收站</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --neon-pink: #ff2a6d;
+      --neon-cyan: #05d9e8;
+      --neon-purple: #d300c5;
+      --neon-yellow: #f9f002;
+      --bg-dark: #0a0a12;
+      --bg-panel: rgba(12, 12, 28, 0.85);
+      --grid: rgba(5, 217, 232, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      font-family: "Noto Sans SC", sans-serif;
+      background: var(--bg-dark);
+      color: #e0e0ff;
+      overflow-x: hidden;
+    }
+
+    .scanlines {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.12) 2px,
+        rgba(0, 0, 0, 0.12) 4px
+      );
+      z-index: 1000;
+    }
+
+    .grid-bg {
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 40px 40px;
+      perspective: 500px;
+      transform: perspective(500px) rotateX(60deg) scale(2.5) translateY(-20%);
+      opacity: 0.6;
+      z-index: 0;
+    }
+
+    .glow-orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.35;
+      z-index: 0;
+      animation: float 8s ease-in-out infinite;
+    }
+    .glow-orb.pink { width: 300px; height: 300px; background: var(--neon-pink); top: 10%; left: 5%; }
+    .glow-orb.cyan { width: 250px; height: 250px; background: var(--neon-cyan); bottom: 20%; right: 10%; animation-delay: -3s; }
+
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0); }
+      50% { transform: translate(20px, -30px); }
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .logo {
+      font-family: Orbitron, sans-serif;
+      font-size: clamp(1.4rem, 5vw, 2rem);
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink), var(--neon-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 0 30px rgba(255, 42, 109, 0.5);
+      animation: flicker 4s infinite;
+    }
+
+    @keyframes flicker {
+      0%, 95%, 100% { opacity: 1; }
+      96% { opacity: 0.85; }
+      97% { opacity: 1; }
+      98% { opacity: 0.9; }
+    }
+
+    .tagline {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      color: rgba(224, 224, 255, 0.65);
+    }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid rgba(5, 217, 232, 0.35);
+      border-radius: 4px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+      box-shadow:
+        0 0 20px rgba(5, 217, 232, 0.15),
+        inset 0 0 40px rgba(5, 217, 232, 0.03);
+      position: relative;
+    }
+
+    .panel::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--neon-cyan), var(--neon-pink), transparent);
+    }
+
+    .panel-label {
+      font-family: Orbitron, sans-serif;
+      font-size: 0.7rem;
+      color: var(--neon-cyan);
+      letter-spacing: 0.2em;
+      margin-bottom: 0.75rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 42, 109, 0.4);
+      border-radius: 2px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 1rem;
+      padding: 0.75rem;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    textarea:focus {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 12px rgba(5, 217, 232, 0.3);
+    }
+
+    textarea::placeholder { color: rgba(255, 255, 255, 0.3); }
+
+    .char-count {
+      text-align: right;
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.4);
+      margin-top: 0.35rem;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-top: 1rem;
+    }
+
+    .btn {
+      font-family: Orbitron, sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      padding: 0.75rem 1.5rem;
+      border: none;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--neon-pink), var(--neon-purple));
+      color: #fff;
+      clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+      box-shadow: 0 0 20px rgba(255, 42, 109, 0.5);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 0 30px rgba(255, 42, 109, 0.8);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--neon-cyan);
+      border: 1px solid var(--neon-cyan);
+      clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(5, 217, 232, 0.1);
+      box-shadow: 0 0 15px rgba(5, 217, 232, 0.4);
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      color: rgba(224, 224, 255, 0.8);
+    }
+
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(5, 217, 232, 0.5);
+      border-radius: 2px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: "";
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: var(--neon-cyan);
+      transition: 0.2s;
+    }
+
+    .toggle input:checked + .toggle-slider {
+      background: rgba(255, 42, 109, 0.2);
+      border-color: var(--neon-pink);
+    }
+
+    .toggle input:checked + .toggle-slider::before {
+      left: calc(100% - 19px);
+      background: var(--neon-pink);
+    }
+
+    .recycler {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      padding: 1.5rem;
+      min-height: 100px;
+    }
+
+    .recycler-icon {
+      width: 64px;
+      height: 64px;
+      border: 2px solid var(--neon-cyan);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      animation: spin-slow 12s linear infinite;
+      box-shadow: 0 0 20px rgba(5, 217, 232, 0.4);
+    }
+
+    .recycler.active .recycler-icon {
+      animation: spin-fast 0.8s linear infinite;
+      border-color: var(--neon-pink);
+      box-shadow: 0 0 25px rgba(255, 42, 109, 0.6);
+    }
+
+    @keyframes spin-slow { to { transform: rotate(360deg); } }
+    @keyframes spin-fast { to { transform: rotate(360deg); } }
+
+    .recycler-status {
+      font-family: Orbitron, sans-serif;
+      font-size: 0.75rem;
+      color: var(--neon-cyan);
+      letter-spacing: 0.15em;
+    }
+
+    .output-text {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(0, 0, 0, 0.5);
+      border-left: 3px solid var(--neon-yellow);
+      font-size: 1.05rem;
+      line-height: 1.6;
+      min-height: 3rem;
+      display: none;
+    }
+
+    .output-text.visible { display: block; }
+
+    .output-text .censor {
+      color: var(--neon-yellow);
+      font-weight: 700;
+      text-shadow: 0 0 8px var(--neon-yellow);
+    }
+
+    .certificate {
+      display: none;
+      margin-top: 1.25rem;
+      padding: 1.5rem;
+      background: linear-gradient(145deg, rgba(20, 10, 40, 0.95), rgba(10, 20, 50, 0.95));
+      border: 2px solid var(--neon-purple);
+      position: relative;
+      text-align: center;
+    }
+
+    .certificate.visible { display: block; animation: cert-in 0.6s ease-out; }
+
+    @keyframes cert-in {
+      from { opacity: 0; transform: scale(0.95) translateY(10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .certificate::after {
+      content: "✓ 已认证";
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      font-family: Orbitron, sans-serif;
+      font-size: 0.65rem;
+      color: var(--neon-cyan);
+      border: 1px solid var(--neon-cyan);
+      padding: 0.2rem 0.5rem;
+      transform: rotate(12deg);
+    }
+
+    .cert-title {
+      font-family: Orbitron, sans-serif;
+      font-size: 1rem;
+      color: var(--neon-pink);
+      letter-spacing: 0.15em;
+      margin-bottom: 0.75rem;
+    }
+
+    .cert-body {
+      font-size: 0.95rem;
+      line-height: 1.8;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .cert-pollution {
+      margin-top: 1rem;
+      font-family: Orbitron, sans-serif;
+      font-size: 1.2rem;
+      color: var(--neon-cyan);
+    }
+
+    .cert-id {
+      margin-top: 0.75rem;
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.4);
+      font-family: monospace;
+    }
+
+    .rose-mode {
+      display: none;
+      margin-top: 1rem;
+      padding: 1.25rem;
+      background: linear-gradient(135deg, rgba(80, 20, 60, 0.4), rgba(40, 10, 50, 0.5));
+      border: 1px solid rgba(255, 100, 150, 0.5);
+      text-align: center;
+    }
+
+    .rose-mode.visible { display: block; animation: cert-in 0.5s ease-out; }
+
+    .rose-emoji { font-size: 3rem; margin-bottom: 0.5rem; animation: rose-pulse 2s ease-in-out infinite; }
+
+    @keyframes rose-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+
+    .rose-text {
+      font-size: 1.1rem;
+      font-style: italic;
+      color: #ffb3d9;
+      line-height: 1.7;
+    }
+
+    .wall {
+      margin-top: 0.5rem;
+    }
+
+    .wall-item {
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      background: rgba(0, 0, 0, 0.35);
+      border-left: 2px solid var(--neon-purple);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .wall-meta {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.35);
+      margin-top: 0.35rem;
+    }
+
+    .wall-empty {
+      text-align: center;
+      color: rgba(255, 255, 255, 0.35);
+      font-size: 0.85rem;
+      padding: 1rem;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.25);
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+  <div class="glow-orb pink"></div>
+  <div class="glow-orb cyan"></div>
+  <div class="scanlines"></div>
+
+  <main class="container">
+    <header>
+      <h1 class="logo">垃圾回收站</h1>
+      <p class="tagline">给想骂人但不能骂的人 · 合法情绪降解终端 v2.077</p>
+    </header>
+
+    <section class="panel">
+      <div class="panel-label">// 输入待回收物质</div>
+      <textarea
+        id="input"
+        maxlength="500"
+        placeholder="把想对奇葩同事/客服/前任说的话倒进来……回收站负责无害化处理。"
+      ></textarea>
+      <div class="char-count"><span id="charCount">0</span> / 500</div>
+
+      <div class="controls">
+        <button type="button" class="btn btn-primary" id="recycleBtn">♻ 回收</button>
+        <label class="toggle-row">
+          <span class="toggle">
+            <input type="checkbox" id="publicToggle" />
+            <span class="toggle-slider"></span>
+          </span>
+          随机匿名公开
+        </label>
+        <label class="toggle-row">
+          <span class="toggle">
+            <input type="checkbox" id="roseToggle" />
+            <span class="toggle-slider"></span>
+          </span>
+          和解模式 🌹
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-label">// 降解舱</div>
+      <div class="recycler" id="recycler">
+        <div class="recycler-icon">♻</div>
+        <div>
+          <div class="recycler-status" id="statusText">待机中 · STANDBY</div>
+        </div>
+      </div>
+      <div class="output-text" id="output"></div>
+      <div class="rose-mode" id="roseMode">
+        <div class="rose-emoji">🌹</div>
+        <p class="rose-text" id="roseText"></p>
+      </div>
+      <div class="certificate" id="certificate">
+        <div class="cert-title">情绪干净证明</div>
+        <p class="cert-body" id="certBody"></p>
+        <div class="cert-pollution" id="certPollution"></div>
+        <div class="cert-id" id="certId"></div>
+      </div>
+    </section>
+
+    <section class="panel wall">
+      <div class="panel-label">// 匿名共情墙 · 已无害化</div>
+      <div id="wallList">
+        <p class="wall-empty">还没有人公开垃圾话，你来当第一个？</p>
+      </div>
+    </section>
+
+    <footer>本回收站不存储原始脏话 · 仅本地演示 · 污染指数纯属娱乐</footer>
+  </main>
+
+  <script>
+    const PROFANITY = [
+      "傻逼", "傻b", "傻B", "沙比", "煞笔", "傻叉", "草泥马", "操你", "操他", "操她",
+      "他妈", "她妈", "你妈", "尼玛", "泥马", "去死", "滚蛋", "滚开", "贱人", "婊子",
+      "狗日", "混蛋", "王八", "王八蛋", "废物", "垃圾", "白痴", "智障", "脑残",
+      "妈的", "妈逼", "马勒戈壁", "卧槽", "我操", "我靠", "靠北", "靠腰", "tmd", "nmd",
+      "cnm", "sb", "nmsl", "草", "艹", "肏", "屎", "屁", "粪", "贱", "婊",
+      "fuck", "shit", "damn", "bitch", "asshole", "bastard", "dick", "cunt",
+      "死全家", "不得好死", "神经病", "有病", "去你", "狗屎", "吃屎", "猪头"
+    ].sort((a, b) => b.length - a.length);
+
+    const CENSOR_VISUALS = [
+      { display: "哔——" },
+      { display: "哔哔——" },
+      { display: "🌼" },
+      { display: "🌼🌼" },
+    ];
+
+    const ROSE_TEMPLATES = [
+      "愿你的话语化作晨露，滋润彼此心田的玫瑰。",
+      "每一句未出口的锋芒，都是心里藏着的一束未送出的花。",
+      "愤怒是暂时的乌云，理解是永恒的晴空与玫瑰园。",
+      "把刺留给过去，把花瓣留给明天。",
+      "世界很大，不值得用脏话丈量；不如用一朵玫瑰丈量温柔。",
+      "您的心声已转码为：{rose}——请查收这份和解。",
+    ];
+
+    const ROSE_WORDS = {
+      "烦": "心中偶有微风拂过",
+      "讨厌": "尚未结缘的缘分",
+      "恨": "深刻的记忆",
+      "滚": "请走向您的人生下一站",
+      "死": "长眠于往事",
+      "傻": "天真烂漫",
+      "笨": "质朴可爱",
+      "烂": "有待雕琢",
+      "垃圾": "可回收资源",
+      "废物": "潜力股",
+      "白痴": "纯粹的灵魂",
+      "操": "操作",
+      "草": "青草",
+      "靠": "依靠",
+      "妈": "母亲",
+      "狗": "忠诚的朋友",
+      "猪": "福气的象征",
+    };
+
+    const STORAGE_KEY = "garbage-recycle-wall";
+
+    const input = document.getElementById("input");
+    const charCount = document.getElementById("charCount");
+    const recycleBtn = document.getElementById("recycleBtn");
+    const publicToggle = document.getElementById("publicToggle");
+    const roseToggle = document.getElementById("roseToggle");
+    const recycler = document.getElementById("recycler");
+    const statusText = document.getElementById("statusText");
+    const output = document.getElementById("output");
+    const roseMode = document.getElementById("roseMode");
+    const roseText = document.getElementById("roseText");
+    const certificate = document.getElementById("certificate");
+    const certBody = document.getElementById("certBody");
+    const certPollution = document.getElementById("certPollution");
+    const certId = document.getElementById("certId");
+    const wallList = document.getElementById("wallList");
+
+    let audioCtx = null;
+    let isProcessing = false;
+
+    input.addEventListener("input", () => {
+      charCount.textContent = input.value.length;
+    });
+
+    function getAudioCtx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+
+    function playBeep(duration = 0.15) {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      osc.type = "square";
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + duration);
+    }
+
+    function playMechanicalHum() {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 120;
+      osc.type = "sawtooth";
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    }
+
+    function escapeRegex(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function buildProfanityRegex() {
+      const parts = PROFANITY.map((w) => escapeRegex(w));
+      return new RegExp(parts.join("|"), "gi");
+    }
+
+    const profanityRegex = buildProfanityRegex();
+
+    function randomCensorVisual() {
+      return CENSOR_VISUALS[Math.floor(Math.random() * CENSOR_VISUALS.length)];
+    }
+
+    function sanitize(text) {
+      const segments = [];
+      let lastIndex = 0;
+      const regex = new RegExp(profanityRegex.source, "gi");
+      let match;
+
+      while ((match = regex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          segments.push({ type: "text", value: text.slice(lastIndex, match.index) });
+        }
+        const visual = randomCensorVisual();
+        segments.push({ type: "censor", display: visual.display, original: match[0] });
+        lastIndex = regex.lastIndex;
+      }
+
+      if (lastIndex < text.length) {
+        segments.push({ type: "text", value: text.slice(lastIndex) });
+      }
+
+      const sanitized = segments
+        .map((s) => (s.type === "censor" ? s.display : s.value))
+        .join("");
+
+      return { segments, sanitized };
+    }
+
+    function renderOutput(segments) {
+      output.innerHTML = segments
+        .map((s) =>
+          s.type === "censor"
+            ? `<span class="censor">${escapeHtml(s.display)}</span>`
+            : escapeHtml(s.value)
+        )
+        .join("");
+      output.classList.add("visible");
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function speakSegment(text) {
+      return new Promise((resolve) => {
+        if (!text.trim()) {
+          resolve();
+          return;
+        }
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "zh-CN";
+        u.rate = 0.85;
+        u.pitch = 0.6;
+        u.volume = 1;
+        const voices = speechSynthesis.getVoices();
+        const zh = voices.find((v) => v.lang.startsWith("zh"));
+        if (zh) u.voice = zh;
+        u.onend = resolve;
+        u.onerror = resolve;
+        speechSynthesis.speak(u);
+      });
+    }
+
+    function delay(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    async function playSanitizedAudio(segments) {
+      speechSynthesis.cancel();
+      for (const seg of segments) {
+        if (seg.type === "text" && seg.value.trim()) {
+          await speakSegment(seg.value);
+        } else if (seg.type === "censor") {
+          const beepLen = Math.min(0.12 + seg.original.length * 0.04, 0.35);
+          playBeep(beepLen);
+          await delay(beepLen * 1000 + 80);
+        }
+      }
+    }
+
+    function toRosePoetry(text) {
+      let poetic = text;
+      for (const [key, val] of Object.entries(ROSE_WORDS)) {
+        poetic = poetic.split(key).join(val);
+      }
+      const template = ROSE_TEMPLATES[Math.floor(Math.random() * ROSE_TEMPLATES.length)];
+      const roseLine = poetic.length > 80 ? poetic.slice(0, 80) + "……" : poetic;
+      return template.replace("{rose}", roseLine || "一朵静默绽放的玫瑰");
+    }
+
+    function generateCertId() {
+      const t = Date.now().toString(36).toUpperCase();
+      const r = Math.random().toString(36).slice(2, 6).toUpperCase();
+      return `GARBAGE-RECYCLE-${t}-${r}`;
+    }
+
+    function showCertificate(sanitized, censorCount) {
+      const reduction = Math.min(19 + censorCount * 3, 97);
+      certBody.textContent =
+        "您的负能量已安全降解，污染指数降低 " +
+        reduction +
+        "%。经光谱分析，当前情绪洁净度达标，可重返文明社会。";
+      certPollution.textContent = `▼ 污染指数 -${reduction}% ▼`;
+      certId.textContent = `证书编号：${generateCertId()} · ${new Date().toLocaleString("zh-CN")}`;
+      certificate.classList.add("visible");
+    }
+
+    function loadWall() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const items = raw ? JSON.parse(raw) : [];
+        renderWall(items);
+      } catch {
+        renderWall([]);
+      }
+    }
+
+    function renderWall(items) {
+      if (!items.length) {
+        wallList.innerHTML = '<p class="wall-empty">还没有人公开垃圾话，你来当第一个？</p>';
+        return;
+      }
+      wallList.innerHTML = items
+        .slice(0, 20)
+        .map(
+          (item) => `
+        <div class="wall-item">
+          ${escapeHtml(item.text)}
+          <div class="wall-meta">${escapeHtml(item.time)} · 匿名旅人 #${item.id}</div>
+        </div>`
+        )
+        .join("");
+    }
+
+    function publishToWall(sanitized) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const items = raw ? JSON.parse(raw) : [];
+        items.unshift({
+          text: sanitized,
+          time: new Date().toLocaleString("zh-CN"),
+          id: Math.floor(Math.random() * 9000 + 1000),
+        });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, 50)));
+        renderWall(items.slice(0, 20));
+      } catch (e) {
+        console.warn("wall save failed", e);
+      }
+    }
+
+    recycleBtn.addEventListener("click", async () => {
+      const text = input.value.trim();
+      if (!text || isProcessing) return;
+
+      if (audioCtx?.state === "suspended") await audioCtx.resume();
+
+      isProcessing = true;
+      recycleBtn.disabled = true;
+      recycler.classList.add("active");
+      certificate.classList.remove("visible");
+      roseMode.classList.remove("visible");
+      output.classList.remove("visible");
+
+      const statuses = [
+        "扫描毒性物质…",
+        "启动哔——滤波器…",
+        "注入🌼中和剂…",
+        "机械复述中…",
+        "降解完成 · DEGRADED",
+      ];
+      let si = 0;
+      const statusInterval = setInterval(() => {
+        statusText.textContent = statuses[si % statuses.length];
+        si++;
+        playMechanicalHum();
+      }, 600);
+
+      const { segments, sanitized } = sanitize(text);
+      const censorCount = segments.filter((s) => s.type === "censor").length;
+
+      await delay(400);
+      renderOutput(segments);
+      statusText.textContent = "机械复述中 · VOCALIZING…";
+
+      await playSanitizedAudio(segments);
+
+      clearInterval(statusInterval);
+      recycler.classList.remove("active");
+      statusText.textContent = "降解完成 · DEGRADED";
+
+      showCertificate(sanitized, censorCount);
+
+      if (roseToggle.checked) {
+        roseText.textContent = toRosePoetry(text);
+        roseMode.classList.add("visible");
+      }
+
+      if (publicToggle.checked) {
+        publishToWall(sanitized);
+      }
+
+      isProcessing = false;
+      recycleBtn.disabled = false;
+    });
+
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+    }
+
+    loadWall();
+  </script>
+</body>
+</html>
