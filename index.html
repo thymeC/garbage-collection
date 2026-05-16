@@ -829,6 +829,7 @@
     const wallList = document.getElementById("wallList");
 
     let audioCtx = null;
+    let zhVoice = null;
     let isProcessing = false;
 
     input.addEventListener("input", () => {
@@ -840,8 +841,35 @@
       return audioCtx;
     }
 
+    function loadVoices() {
+      const voices = speechSynthesis.getVoices();
+      zhVoice =
+        voices.find((v) => v.lang.startsWith("zh-CN")) ||
+        voices.find((v) => v.lang.startsWith("zh")) ||
+        voices[0] ||
+        null;
+    }
+
+    async function ensureAudioReady() {
+      const ctx = getAudioCtx();
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+      // iOS/Safari: a silent buffer helps unlock Web Audio after the click gesture.
+      const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      loadVoices();
+      speechSynthesis.getVoices();
+    }
+
     function playBeep(duration = 0.12) {
       const ctx = getAudioCtx();
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
       const t0 = ctx.currentTime;
       const d = Math.min(Math.max(duration, 0.09), 0.17);
 
@@ -878,6 +906,9 @@
 
     function playMechanicalHum() {
       const ctx = getAudioCtx();
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -975,17 +1006,31 @@
           resolve();
           return;
         }
+        if (!("speechSynthesis" in window)) {
+          resolve();
+          return;
+        }
+        loadVoices();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = "zh-CN";
         u.rate = 0.85;
         u.pitch = 0.6;
         u.volume = 1;
-        const voices = speechSynthesis.getVoices();
-        const zh = voices.find((v) => v.lang.startsWith("zh"));
-        if (zh) u.voice = zh;
-        u.onend = resolve;
-        u.onerror = resolve;
+        if (zhVoice) u.voice = zhVoice;
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        u.onend = done;
+        u.onerror = done;
+        speechSynthesis.cancel();
+        if (speechSynthesis.paused) {
+          speechSynthesis.resume();
+        }
         speechSynthesis.speak(u);
+        window.setTimeout(done, Math.max(8000, text.length * 420));
       });
     }
 
@@ -1084,61 +1129,72 @@
       const text = input.value.trim();
       if (!text || isProcessing) return;
 
-      if (audioCtx?.state === "suspended") await audioCtx.resume();
-
       isProcessing = true;
       recycleBtn.disabled = true;
-      recycler.classList.add("active");
-      certificate.classList.remove("visible");
-      certBay.classList.remove("certificate-ready");
-      roseMode.classList.remove("visible");
-      outputTrack.innerHTML = "";
-      output.classList.remove("visible");
+      let statusInterval = null;
 
-      const statuses = [
-        "扫描毒性物质…",
-        "启动哔——滤波器…",
-        "注入🌼中和剂…",
-        "机械复述中…",
-        "降解完成 · DEGRADED",
-      ];
-      let si = 0;
-      const statusInterval = setInterval(() => {
-        statusText.textContent = statuses[si % statuses.length];
-        si++;
-        playMechanicalHum();
-      }, 600);
+      try {
+        await ensureAudioReady();
 
-      const { segments, sanitized } = sanitize(text);
-      const censorCount = segments.filter((s) => s.type === "censor").length;
+        recycler.classList.add("active");
+        certificate.classList.remove("visible");
+        certBay.classList.remove("certificate-ready");
+        roseMode.classList.remove("visible");
+        outputTrack.innerHTML = "";
+        output.classList.remove("visible");
 
-      await delay(400);
-      statusText.textContent = "机械复述中 · VOCALIZING…";
+        const statuses = [
+          "扫描毒性物质…",
+          "启动哔——滤波器…",
+          "注入🌼中和剂…",
+          "机械复述中…",
+          "降解完成 · DEGRADED",
+        ];
+        let si = 0;
+        statusInterval = setInterval(() => {
+          statusText.textContent = statuses[si % statuses.length];
+          si++;
+          playMechanicalHum();
+        }, 600);
 
-      await playSanitizedAudio(segments);
+        const { segments, sanitized } = sanitize(text);
+        const censorCount = segments.filter((s) => s.type === "censor").length;
 
-      clearInterval(statusInterval);
-      recycler.classList.remove("active");
-      statusText.textContent = "降解完成 · DEGRADED";
+        await delay(400);
+        statusText.textContent = "机械复述中 · VOCALIZING…";
 
-      showCertificate(sanitized, censorCount);
+        await playSanitizedAudio(segments);
 
-      if (roseToggle.checked) {
-        roseText.textContent = toRosePoetry(text);
-        roseMode.classList.add("visible");
+        clearInterval(statusInterval);
+        statusInterval = null;
+        recycler.classList.remove("active");
+        statusText.textContent = "降解完成 · DEGRADED";
+
+        showCertificate(sanitized, censorCount);
+
+        if (roseToggle.checked) {
+          roseText.textContent = toRosePoetry(text);
+          roseMode.classList.add("visible");
+        }
+
+        if (publicToggle.checked) {
+          publishToWall(sanitized);
+        }
+      } catch (err) {
+        console.error(err);
+        if (statusInterval) clearInterval(statusInterval);
+        recycler.classList.remove("active");
+        statusText.textContent = "运行异常 · ERROR";
+      } finally {
+        isProcessing = false;
+        recycleBtn.disabled = false;
       }
-
-      if (publicToggle.checked) {
-        publishToWall(sanitized);
-      }
-
-      isProcessing = false;
-      recycleBtn.disabled = false;
     });
 
     if (speechSynthesis.onvoiceschanged !== undefined) {
-      speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+      speechSynthesis.onvoiceschanged = loadVoices;
     }
+    loadVoices();
 
     loadWall();
   </script>
