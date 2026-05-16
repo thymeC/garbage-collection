@@ -440,6 +440,10 @@
       font-size: 0.72rem;
     }
 
+    .output-text.reconcile-mode::before {
+      content: "等待和解复述…";
+    }
+
     .output-text.visible:has(#outputTrack:not(:empty))::before {
       content: none;
     }
@@ -779,36 +783,46 @@
       { display: "🌼🌼" },
     ];
 
-    const ROSE_TEMPLATES = [
-      "愿你的话语化作晨露，滋润彼此心田的玫瑰。",
-      "每一句未出口的锋芒，都是心里藏着的一束未送出的花。",
-      "愤怒是暂时的乌云，理解是永恒的晴空与玫瑰园。",
-      "把刺留给过去，把花瓣留给明天。",
-      "世界很大，不值得用脏话丈量；不如用一朵玫瑰丈量温柔。",
-      "您的心声已转码为：{rose}——请查收这份和解。",
-    ];
-
-    const ROSE_WORDS = {
-      "烦": "心中偶有微风拂过",
-      "讨厌": "尚未结缘的缘分",
-      "恨": "深刻的记忆",
-      "滚": "请走向您的人生下一站",
-      "死": "长眠于往事",
-      "傻": "天真烂漫",
-      "笨": "质朴可爱",
-      "烂": "有待雕琢",
-      "垃圾": "可回收资源",
-      "废物": "潜力股",
-      "白痴": "纯粹的灵魂",
-      "操": "操作",
-      "草": "青草",
-      "靠": "依靠",
-      "妈": "母亲",
-      "狗": "忠诚的朋友",
-      "猪": "福气的象征",
+    const RECONCILE_FALLBACK = {
+      version: 1,
+      maxChars: 120,
+      templates: ["转码：{body}", "{body}～"],
+      categories: [
+        {
+          id: "profanity",
+          label: "脏话/辱骂",
+          replacements: ["小可爱", "你礼貌吗"],
+          patterns: ["傻逼", "傻b", "sb", "废物", "白痴"],
+        },
+        {
+          id: "hatred",
+          label: "厌恶/恨意",
+          replacements: ["爱死你了", "我谢谢你啊"],
+          patterns: ["讨厌", "恨", "烦", "恶心"],
+        },
+        {
+          id: "surprise_anger",
+          label: "惊讶/愤怒",
+          replacements: ["卧槽", "啊这"],
+          patterns: ["我操", "我靠", "靠", "气死"],
+        },
+        {
+          id: "negation",
+          label: "否定",
+          replacements: ["毛线", "个鬼"],
+          patterns: ["不要", "不行", "不是", "不会", "没有", "别想", "别烦"],
+        },
+        {
+          id: "conflict_end",
+          label: "冲突终结",
+          replacements: ["么么哒", "你开心就好"],
+          patterns: ["去死", "滚蛋", "滚开", "闭嘴", "算了", "滚"],
+        },
+      ],
     };
 
     const STORAGE_KEY = "garbage-recycle-wall";
+    let reconcileRulesCache = null;
 
     const input = document.getElementById("input");
     const charCount = document.getElementById("charCount");
@@ -923,6 +937,73 @@
 
     function escapeRegex(s) {
       return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function pickRandom(list) {
+      return list[Math.floor(Math.random() * list.length)];
+    }
+
+    async function loadReconcileRules() {
+      if (reconcileRulesCache) return reconcileRulesCache;
+      try {
+        const res = await fetch("reconcile-rules.json", { cache: "no-store" });
+        if (res.ok) {
+          reconcileRulesCache = await res.json();
+          return reconcileRulesCache;
+        }
+      } catch (e) {
+        console.warn("reconcile-rules.json load failed, using fallback", e);
+      }
+      reconcileRulesCache = RECONCILE_FALLBACK;
+      return reconcileRulesCache;
+    }
+
+    function buildReconcileRules(bank) {
+      const rules = [];
+      for (const category of bank.categories || []) {
+        const replacements = category.replacements || [];
+        if (!replacements.length) continue;
+        for (const pattern of category.patterns || []) {
+          if (!pattern) continue;
+          rules.push({ pattern, replacements });
+        }
+      }
+      rules.sort((a, b) => b.pattern.length - a.pattern.length);
+      return rules;
+    }
+
+    function transcodeToReconcile(text, bank) {
+      const rules = buildReconcileRules(bank);
+      let result = text;
+      let replaceIndex = 0;
+
+      for (const { pattern, replacements } of rules) {
+        const re = new RegExp(escapeRegex(pattern), "gi");
+        result = result.replace(re, () => {
+          const replacement = replacements[replaceIndex % replacements.length];
+          replaceIndex += 1;
+          return replacement;
+        });
+      }
+
+      const maxChars = bank.maxChars || RECONCILE_FALLBACK.maxChars;
+      result = result.replace(/\s+/g, " ").trim();
+      if (result.length > maxChars) {
+        result = result.slice(0, maxChars) + "……";
+      }
+      return result;
+    }
+
+    function formatReconciledLine(body, bank) {
+      const templates = bank.templates || RECONCILE_FALLBACK.templates;
+      const template = pickRandom(templates);
+      return template.replace("{body}", body || "今天也要可爱一点呀");
+    }
+
+    async function toReconcileLine(text) {
+      const bank = await loadReconcileRules();
+      const body = transcodeToReconcile(text, bank);
+      return formatReconciledLine(body, bank);
     }
 
     function buildProfanityRegex() {
@@ -1040,6 +1121,7 @@
 
     async function playSanitizedAudio(segments) {
       speechSynthesis.cancel();
+      output.classList.remove("reconcile-mode");
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
         updateOutputLine(segments, i);
@@ -1054,14 +1136,20 @@
       finishOutputLine();
     }
 
-    function toRosePoetry(text) {
-      let poetic = text;
-      for (const [key, val] of Object.entries(ROSE_WORDS)) {
-        poetic = poetic.split(key).join(val);
-      }
-      const template = ROSE_TEMPLATES[Math.floor(Math.random() * ROSE_TEMPLATES.length)];
-      const roseLine = poetic.length > 80 ? poetic.slice(0, 80) + "……" : poetic;
-      return template.replace("{rose}", roseLine || "一朵静默绽放的玫瑰");
+    function showReconciledOutput(text) {
+      outputTrack.innerHTML = `<span class="output-active">${escapeHtml(text)}</span>`;
+      output.classList.add("visible", "reconcile-mode");
+      requestAnimationFrame(() => {
+        output.scrollLeft = output.scrollWidth;
+      });
+    }
+
+    async function playReconciledAudio(text) {
+      speechSynthesis.cancel();
+      showReconciledOutput(text);
+      await speakSegment(text);
+      outputTrack.innerHTML = '<span class="output-done">和解复述完成 ✓</span>';
+      output.scrollLeft = 0;
     }
 
     function generateCertId() {
@@ -1141,7 +1229,7 @@
         certBay.classList.remove("certificate-ready");
         roseMode.classList.remove("visible");
         outputTrack.innerHTML = "";
-        output.classList.remove("visible");
+        output.classList.remove("visible", "reconcile-mode");
 
         const statuses = [
           "扫描毒性物质…",
@@ -1159,11 +1247,21 @@
 
         const { segments, sanitized } = sanitize(text);
         const censorCount = segments.filter((s) => s.type === "censor").length;
+        const bank = await loadReconcileRules();
+        const reconciledBody = transcodeToReconcile(text, bank);
+        const reconciledLine = formatReconciledLine(reconciledBody, bank);
+        const useReconcileVoice = roseToggle.checked;
 
         await delay(400);
-        statusText.textContent = "机械复述中 · VOCALIZING…";
+        statusText.textContent = useReconcileVoice
+          ? "和解复述中 · RECONCILED…"
+          : "机械复述中 · VOCALIZING…";
 
-        await playSanitizedAudio(segments);
+        if (useReconcileVoice) {
+          await playReconciledAudio(reconciledBody);
+        } else {
+          await playSanitizedAudio(segments);
+        }
 
         clearInterval(statusInterval);
         statusInterval = null;
@@ -1172,13 +1270,13 @@
 
         showCertificate(sanitized, censorCount);
 
-        if (roseToggle.checked) {
-          roseText.textContent = toRosePoetry(text);
+        if (useReconcileVoice) {
+          roseText.textContent = reconciledLine;
           roseMode.classList.add("visible");
         }
 
         if (publicToggle.checked) {
-          publishToWall(sanitized);
+          publishToWall(reconciledLine);
         }
       } catch (err) {
         console.error(err);
@@ -1195,6 +1293,7 @@
       speechSynthesis.onvoiceschanged = loadVoices;
     }
     loadVoices();
+    loadReconcileRules();
 
     loadWall();
   </script>

@@ -28,6 +28,7 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html _site/
+          cp reconcile-rules.json _site/
           cp .nojekyll _site/
 
       - name: Configure Pages
