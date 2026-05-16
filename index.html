@@ -816,18 +816,40 @@
       return audioCtx;
     }
 
-    function playBeep(duration = 0.15) {
+    function playBeep(duration = 0.12) {
       const ctx = getAudioCtx();
+      const t0 = ctx.currentTime;
+      const d = Math.min(Math.max(duration, 0.09), 0.17);
+
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(1150, t0);
+      osc.frequency.exponentialRampToValueAtTime(820, t0 + d * 0.9);
+
+      gain.gain.setValueAtTime(0.001, t0);
+      gain.gain.linearRampToValueAtTime(0.4, t0 + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + d);
+
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      osc.type = "square";
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + duration);
+      osc.start(t0);
+      osc.stop(t0 + d + 0.015);
+
+      const click = ctx.createBufferSource();
+      const len = Math.floor(ctx.sampleRate * 0.012);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      }
+      click.buffer = buf;
+      const clickGain = ctx.createGain();
+      clickGain.gain.setValueAtTime(0.08, t0);
+      clickGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.012);
+      click.connect(clickGain);
+      clickGain.connect(ctx.destination);
+      click.start(t0);
     }
 
     function playMechanicalHum() {
@@ -869,8 +891,11 @@
         if (match.index > lastIndex) {
           segments.push({ type: "text", value: text.slice(lastIndex, match.index) });
         }
-        const visual = randomCensorVisual();
-        segments.push({ type: "censor", display: visual.display, original: match[0] });
+        const word = match[0];
+        for (const char of word) {
+          const visual = randomCensorVisual();
+          segments.push({ type: "censor", display: visual.display, original: char });
+        }
         lastIndex = regex.lastIndex;
       }
 
@@ -952,9 +977,9 @@
         if (seg.type === "text" && seg.value.trim()) {
           await speakSegment(seg.value);
         } else if (seg.type === "censor") {
-          const beepLen = Math.min(0.12 + seg.original.length * 0.04, 0.35);
+          const beepLen = 0.11;
           playBeep(beepLen);
-          await delay(beepLen * 1000 + 80);
+          await delay(beepLen * 1000 + 35);
         }
       }
       finishOutputLine();
