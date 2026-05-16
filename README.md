@@ -77,6 +77,29 @@ python3 -m http.server 8765
 
 浏览器打开 `http://localhost:8765`，或使用 VS Code / Cursor 的 **Live Server** 扩展预览 `index.html`（推荐，便于语音与音频 API 正常工作）。
 
+## GitHub Pages 部署
+
+本仓库已配置 GitHub Actions（[`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)）：推送到 `main` 分支后自动发布。
+
+**线上地址：** https://thymeC.github.io/garbage-collection/
+
+### 首次启用（只需做一次）
+
+1. 打开仓库 **Settings → Pages**
+2. **Build and deployment → Source** 选择 **GitHub Actions**
+3. 将本仓库的 `main` 分支推送上去；在 **Actions** 页确认 `Deploy to GitHub Pages` 工作流运行成功
+4. 几分钟后访问上方链接
+
+### 日常更新
+
+```bash
+git add .
+git commit -m "your message"
+git push origin main
+```
+
+推送成功后 Actions 会自动重新部署，无需其他操作。
+
 ## 技术栈
 
 - 单页 `index.html`（内联 CSS + JavaScript）
@@ -89,6 +112,8 @@ python3 -m http.server 8765
 
 ```
 garbage-collection/
+├── .github/workflows/deploy-pages.yml
+├── .nojekyll
 ├── index.html    # 完整应用
 └── README.md     # 本文档
 ```
